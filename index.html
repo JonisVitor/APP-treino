@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101820">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Treino Progressivo</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Treino Progressivo</p>
+        <h1 id="screenTitle">Hoje</h1>
+      </div>
+      <button class="icon-button" id="installBtn" type="button" hidden title="Instalar app">
+        <span>+</span>
+      </button>
+    </header>
+
+    <main>
+      <section class="view active" id="viewToday" aria-labelledby="screenTitle">
+        <div class="hero-panel">
+          <div>
+            <p class="muted">Escolha o treino e registre as séries de trabalho.</p>
+            <label class="program-picker">
+              Treino da vez
+              <select id="todayProgramSelect"></select>
+            </label>
+            <div class="week-strip" id="weekStrip"></div>
+          </div>
+          <div class="session-meter">
+            <span id="todayVolume">0 kg</span>
+            <small>volume hoje</small>
+          </div>
+        </div>
+
+        <div class="segmented" id="workoutTabs"></div>
+        <div class="toolbar">
+          <button class="primary" id="finishSessionBtn" type="button">Finalizar treino</button>
+          <button class="ghost" id="clearTodayBtn" type="button">Limpar hoje</button>
+        </div>
+        <div class="exercise-list" id="exerciseList"></div>
+      </section>
+
+      <section class="view" id="viewProgress">
+        <div class="panel-title">
+          <div>
+            <p class="eyebrow">Evolução</p>
+            <h2>Resumo dos exercícios</h2>
+          </div>
+          <select id="progressWorkoutFilter" aria-label="Filtrar treino"></select>
+        </div>
+        <div class="metric-grid">
+          <article class="metric-card">
+            <span id="totalSessions">0</span>
+            <small>treinos salvos</small>
+          </article>
+          <article class="metric-card">
+            <span id="bestVolume">0 kg</span>
+            <small>melhor volume</small>
+          </article>
+          <article class="metric-card">
+            <span id="progressCount">0</span>
+            <small>exercícios subindo</small>
+          </article>
+        </div>
+        <div class="progress-list" id="progressList"></div>
+      </section>
+
+      <section class="view" id="viewHistory">
+        <div class="panel-title">
+          <div>
+            <p class="eyebrow">Histórico</p>
+            <h2>Treinos anteriores</h2>
+          </div>
+          <button class="ghost compact" id="exportBtn" type="button">Exportar</button>
+        </div>
+        <div class="history-list" id="historyList"></div>
+      </section>
+
+      <section class="view" id="viewEdit">
+        <div class="panel-title">
+          <div>
+            <p class="eyebrow">Editar</p>
+            <h2>Treinos e exercícios</h2>
+          </div>
+          <button class="primary compact" id="addWorkoutBtn" type="button">Novo treino</button>
+        </div>
+        <div class="edit-list" id="editList"></div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Navegação principal">
+      <button class="nav-item active" data-view="Today" type="button">
+        Hoje
+      </button>
+      <button class="nav-item" data-view="Progress" type="button">
+        Evolução
+      </button>
+      <button class="nav-item" data-view="History" type="button">
+        Histórico
+      </button>
+      <button class="nav-item" data-view="Edit" type="button">
+        Editar
+      </button>
+    </nav>
+  </div>
+
+  <dialog id="editDialog">
+    <form method="dialog" class="dialog-card" id="exerciseForm">
+      <h3 id="dialogTitle">Editar exercício</h3>
+      <label>
+        Nome
+        <input id="exerciseName" required>
+      </label>
+      <label>
+        Grupo
+        <input id="exerciseGroup">
+      </label>
+      <div class="field-row">
+        <label>
+          Reps mín.
+          <input id="exerciseMin" inputmode="numeric" type="number" min="0">
+        </label>
+        <label>
+          Reps máx.
+          <input id="exerciseMax" inputmode="numeric" type="number" min="0">
+        </label>
+      </div>
+      <label>
+        Observação
+        <input id="exerciseNote">
+      </label>
+      <div class="dialog-actions">
+        <button class="ghost" value="cancel" type="button" id="cancelEditBtn">Cancelar</button>
+        <button class="primary" value="default" type="submit">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
