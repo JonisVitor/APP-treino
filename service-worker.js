@@ -1,4 +1,4 @@
-const CACHE_NAME = "treino-progressivo-v13";
+const CACHE_NAME = "treino-progressivo-v16";
 const ASSETS = [
   "./",
   "./index.html",

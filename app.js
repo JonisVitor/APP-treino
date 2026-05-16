@@ -63,6 +63,8 @@ const defaultState = {
 let state = loadState();
 let deferredInstallPrompt = null;
 let editingRef = null;
+let selectedProgressExerciseId = null;
+let removeProgramConfirming = false;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -218,6 +220,26 @@ function bestSet(sets) {
     const volume = calcSetVolume(set);
     return volume > calcSetVolume(best) ? set : best;
   }, { weight: 0, reps: 0 });
+}
+
+function entryVolume(entry) {
+  return entry.sets.reduce((sum, set) => sum + calcSetVolume(set), 0);
+}
+
+function lastSetVolume(entry) {
+  return calcSetVolume(entry.sets.at(-1) || {});
+}
+
+function lastSetLabel(entry) {
+  const set = entry.sets.at(-1) || {};
+  return `${Number(set.weight) || 0} x ${Number(set.reps) || 0}`;
+}
+
+function exerciseEntries(exerciseId) {
+  return state.sessions
+    .filter(sessionBelongsToActiveProgram)
+    .flatMap((session) => session.exercises.map((entry) => ({ ...entry, date: session.date, sessionId: session.id })))
+    .filter((entry) => entry.exerciseId === exerciseId && !entry.skipped);
 }
 
 function progressFor(exerciseId, sets) {
@@ -480,21 +502,23 @@ function renderProgress() {
     .filter((workout) => current === "all" || workout.id === current)
     .flatMap((workout) => workout.exercises.map((item) => ({ ...item, workoutId: workout.id, workoutName: workout.name, color: workout.color })));
 
+  if (selectedProgressExerciseId && !exerciseRows.some((item) => item.id === selectedProgressExerciseId)) {
+    selectedProgressExerciseId = null;
+  }
+
   let improving = 0;
   $("#progressList").innerHTML = exerciseRows.map((item) => {
-    const entries = state.sessions
-      .filter(sessionBelongsToActiveProgram)
-      .flatMap((session) => session.exercises.map((entry) => ({ ...entry, date: session.date })))
-      .filter((entry) => entry.exerciseId === item.id && !entry.skipped);
+    const entries = exerciseEntries(item.id);
     const last = entries.at(-1);
     const previous = entries.at(-2);
     const bestWeight = Math.max(0, ...entries.flatMap((entry) => entry.sets.map((set) => Number(set.weight) || 0)));
-    const bestVolume = Math.max(0, ...entries.map((entry) => entry.sets.reduce((sum, set) => sum + calcSetVolume(set), 0)));
+    const bestVolume = Math.max(0, ...entries.map(entryVolume));
+    const expanded = selectedProgressExerciseId === item.id;
     let status = "Sem dados";
     let statusClass = "";
     if (last && previous) {
-      const lastVol = last.sets.reduce((sum, set) => sum + calcSetVolume(set), 0);
-      const prevVol = previous.sets.reduce((sum, set) => sum + calcSetVolume(set), 0);
+      const lastVol = entryVolume(last);
+      const prevVol = entryVolume(previous);
       if (lastVol > prevVol) {
         status = "Subindo";
         statusClass = "up";
@@ -509,7 +533,7 @@ function renderProgress() {
       status = "Novo";
     }
     return `
-      <article class="history-card" style="border-left:5px solid ${item.color}">
+      <article class="history-card progress-card ${expanded ? "expanded" : ""}" style="border-left:5px solid ${item.color}" data-progress-exercise="${item.id}">
         <div class="history-head">
           <div>
             <strong>${escapeHtml(item.name)}</strong>
@@ -522,14 +546,68 @@ function renderProgress() {
           <div class="mini-stat"><strong>${formatKg(bestVolume)}</strong><span>melhor volume</span></div>
           <div class="mini-stat"><strong>${entries.length}</strong><span>registros</span></div>
         </div>
+        ${expanded ? renderExerciseChart(entries) : ""}
       </article>
     `;
   }).join("") || `<div class="empty">Sem exercícios para mostrar.</div>`;
 
-  const bestSessionVolume = Math.max(0, ...state.sessions.map(sessionVolume));
-  $("#totalSessions").textContent = state.sessions.length;
+  $("#progressList").querySelectorAll("[data-progress-exercise]").forEach((card) => {
+    card.addEventListener("click", () => {
+      selectedProgressExerciseId = selectedProgressExerciseId === card.dataset.progressExercise ? null : card.dataset.progressExercise;
+      renderProgress();
+    });
+  });
+
+  const metricSessions = state.sessions
+    .filter(sessionBelongsToActiveProgram)
+    .filter((session) => current === "all" || session.workoutId === current);
+  const bestSessionVolume = Math.max(0, ...metricSessions.map(sessionVolume));
+  $("#totalSessions").textContent = metricSessions.length;
+  $("#totalSessionsLabel").textContent = current === "all" ? "treinos salvos" : "vezes deste treino";
   $("#bestVolume").textContent = formatKg(bestSessionVolume);
   $("#progressCount").textContent = improving;
+}
+
+function renderExerciseChart(entries) {
+  if (!entries.length) return `<div class="chart-empty">Sem registros para montar gráfico.</div>`;
+  const points = entries.map((entry) => ({
+    date: entry.date,
+    total: entryVolume(entry),
+    last: lastSetVolume(entry),
+    lastLabel: lastSetLabel(entry)
+  }));
+  const maxValue = Math.max(1, ...points.flatMap((point) => [point.total, point.last]));
+  const xFor = (index) => points.length === 1 ? 160 : 32 + (index * 256) / (points.length - 1);
+  const yFor = (value) => 118 - (value / maxValue) * 82;
+  const totalLine = points.map((point, index) => `${xFor(index)},${yFor(point.total)}`).join(" ");
+  const lastLine = points.map((point, index) => `${xFor(index)},${yFor(point.last)}`).join(" ");
+  const lastPoint = points.at(-1);
+  return `
+    <div class="exercise-chart">
+      <div class="chart-legend">
+        <span><i class="legend-total"></i>Volume total</span>
+        <span><i class="legend-last"></i>Última série</span>
+      </div>
+      <svg viewBox="0 0 320 172" role="img" aria-label="Gráfico de evolução do exercício">
+        <line x1="24" y1="118" x2="296" y2="118"></line>
+        <line x1="24" y1="26" x2="24" y2="118"></line>
+        <polyline class="line-total" points="${totalLine}"></polyline>
+        <polyline class="line-last" points="${lastLine}"></polyline>
+        ${points.map((point, index) => `
+          <circle class="dot-total" cx="${xFor(index)}" cy="${yFor(point.total)}" r="3.5"></circle>
+          <circle class="dot-last" cx="${xFor(index)}" cy="${yFor(point.last)}" r="3"></circle>
+          <text class="chart-label total-label" x="${xFor(index)}" y="${Math.max(12, yFor(point.total) - 8)}">${formatKg(point.total)}</text>
+          <text class="chart-label last-label" x="${xFor(index)}" y="${Math.min(134, yFor(point.last) + 16)}">${point.lastLabel}</text>
+          <text class="chart-workout-label" x="${xFor(index)}" y="158">T${index + 1}</text>
+        `).join("")}
+      </svg>
+      <div class="chart-summary">
+        <span>Último: ${formatDate(lastPoint.date)}</span>
+        <strong>Total ${formatKg(lastPoint.total)}</strong>
+        <strong>Última ${lastPoint.lastLabel}</strong>
+      </div>
+    </div>
+  `;
 }
 
 function renderHistory() {
@@ -579,8 +657,8 @@ function renderEdit() {
         </label>
       </div>
       <div class="program-actions">
-        <button class="ghost compact" data-program-template="blank" type="button">Adicionar rotina</button>
-        <button class="ghost compact" id="removeProgramBtn" type="button">Remover rotina</button>
+        <button class="ghost compact" id="addWorkoutInProgramBtn" type="button">Adicionar treino</button>
+        <button class="ghost compact ${removeProgramConfirming ? "danger" : ""}" id="removeProgramBtn" type="button">${removeProgramConfirming ? "Confirmar exclusão" : "Remover rotina"}</button>
       </div>
     </article>
   ` + getWorkouts().map((workout) => `
@@ -633,9 +711,7 @@ function renderEdit() {
     getActiveProgram().name = event.target.value || "Rotina sem nome";
     saveState();
   });
-  $("#editList").querySelectorAll("[data-program-template]").forEach((button) => {
-    button.addEventListener("click", () => addProgram(button.dataset.programTemplate));
-  });
+  $("#addWorkoutInProgramBtn").addEventListener("click", addWorkout);
   $("#removeProgramBtn").addEventListener("click", removeActiveProgram);
   $("#editList").querySelectorAll(".workout-input").forEach((input) => {
     input.addEventListener("input", () => {
@@ -711,6 +787,7 @@ function addWorkout() {
   };
   workouts.push(workout);
   state.activeWorkoutId = workout.id;
+  removeProgramConfirming = false;
   saveState();
   render();
 }
@@ -740,6 +817,7 @@ function setActiveProgram(programId) {
   if (!program) return;
   state.activeProgramId = program.id;
   state.activeWorkoutId = program.workouts[0]?.id || "";
+  removeProgramConfirming = false;
   saveState();
   render();
 }
@@ -757,6 +835,7 @@ function addProgram(template) {
   state.programs.push(program);
   state.activeProgramId = program.id;
   state.activeWorkoutId = program.workouts[0]?.id || "";
+  removeProgramConfirming = false;
   saveState();
   render();
 }
@@ -766,10 +845,17 @@ function removeActiveProgram() {
     toast("Mantenha pelo menos uma rotina salva.");
     return;
   }
+  if (!removeProgramConfirming) {
+    removeProgramConfirming = true;
+    renderEdit();
+    toast("Toque em Confirmar exclusão para remover a rotina.");
+    return;
+  }
   const removedId = state.activeProgramId;
   state.programs = state.programs.filter((program) => program.id !== removedId);
   state.activeProgramId = state.programs[0].id;
   state.activeWorkoutId = state.programs[0].workouts[0]?.id || "";
+  removeProgramConfirming = false;
   saveState();
   render();
 }
@@ -864,7 +950,7 @@ $("#finishSessionBtn").addEventListener("click", finishSession);
 $("#clearTodayBtn").addEventListener("click", clearToday);
 $("#progressWorkoutFilter").addEventListener("change", renderProgress);
 $("#exportBtn").addEventListener("click", exportData);
-$("#addWorkoutBtn").addEventListener("click", addWorkout);
+$("#addWorkoutBtn").addEventListener("click", () => addProgram("blank"));
 $("#exerciseForm").addEventListener("submit", saveExercise);
 $("#cancelEditBtn").addEventListener("click", () => $("#editDialog").close());
 
