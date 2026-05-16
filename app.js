@@ -65,6 +65,7 @@ let deferredInstallPrompt = null;
 let editingRef = null;
 let selectedProgressExerciseId = null;
 let removeProgramConfirming = false;
+let exerciseDrag = null;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -658,6 +659,8 @@ function renderEdit() {
       </div>
       <div class="program-actions">
         <button class="ghost compact" id="addWorkoutInProgramBtn" type="button">Adicionar treino</button>
+        <button class="ghost compact" id="exportProgramBtn" type="button">Exportar rotina</button>
+        <button class="ghost compact" id="importProgramBtn" type="button">Importar rotina</button>
         <button class="ghost compact ${removeProgramConfirming ? "danger" : ""}" id="removeProgramBtn" type="button">${removeProgramConfirming ? "Confirmar exclusão" : "Remover rotina"}</button>
       </div>
     </article>
@@ -689,13 +692,13 @@ function renderEdit() {
       </div>
       <div class="edit-exercises">
         ${workout.exercises.map((item) => `
-          <div class="edit-exercise">
+          <div class="edit-exercise" data-workout="${workout.id}" data-exercise="${item.id}">
             <div>
               <strong>${escapeHtml(item.name)}</strong>
               <div class="muted">${escapeHtml(item.group)} - ${item.minReps || "-"}-${item.maxReps || "-"} reps</div>
             </div>
             <div class="edit-buttons">
-              <button class="tiny edit-exercise-btn" data-workout="${workout.id}" data-exercise="${item.id}" type="button">Ed</button>
+              <button class="tiny edit-exercise-btn drag-exercise-handle" data-workout="${workout.id}" data-exercise="${item.id}" type="button" title="Clique para editar, segure e arraste para reordenar">Ed</button>
               <button class="tiny remove-exercise-btn" data-workout="${workout.id}" data-exercise="${item.id}" type="button">x</button>
             </div>
           </div>
@@ -712,6 +715,8 @@ function renderEdit() {
     saveState();
   });
   $("#addWorkoutInProgramBtn").addEventListener("click", addWorkout);
+  $("#exportProgramBtn").addEventListener("click", exportActiveProgram);
+  $("#importProgramBtn").addEventListener("click", () => $("#importProgramInput").click());
   $("#removeProgramBtn").addEventListener("click", removeActiveProgram);
   $("#editList").querySelectorAll(".workout-input").forEach((input) => {
     input.addEventListener("input", () => {
@@ -729,7 +734,14 @@ function renderEdit() {
     button.addEventListener("click", () => removeWorkout(button.dataset.workout));
   });
   $("#editList").querySelectorAll(".edit-exercise-btn").forEach((button) => {
-    button.addEventListener("click", () => openExerciseDialog(button.dataset.workout, button.dataset.exercise));
+    button.addEventListener("click", () => {
+      if (button.dataset.suppressClick === "true") {
+        button.dataset.suppressClick = "";
+        return;
+      }
+      openExerciseDialog(button.dataset.workout, button.dataset.exercise);
+    });
+    button.addEventListener("pointerdown", startExerciseDrag);
   });
   $("#editList").querySelectorAll(".remove-exercise-btn").forEach((button) => {
     button.addEventListener("click", () => {
@@ -752,6 +764,89 @@ function openExerciseDialog(workoutId, exerciseId = null) {
   $("#exerciseMax").value = item?.maxReps || "";
   $("#exerciseNote").value = item?.note || "";
   $("#editDialog").showModal();
+}
+
+function startExerciseDrag(event) {
+  if (event.button !== undefined && event.button !== 0) return;
+  const handle = event.currentTarget;
+  const row = handle.closest(".edit-exercise");
+  if (!row) return;
+  exerciseDrag = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    workoutId: handle.dataset.workout,
+    exerciseId: handle.dataset.exercise,
+    handle,
+    row,
+    dragging: false
+  };
+  handle.setPointerCapture?.(event.pointerId);
+  handle.addEventListener("pointermove", moveExerciseDrag);
+  handle.addEventListener("pointerup", endExerciseDrag);
+  handle.addEventListener("pointercancel", cancelExerciseDrag);
+}
+
+function moveExerciseDrag(event) {
+  if (!exerciseDrag || event.pointerId !== exerciseDrag.pointerId) return;
+  const distance = Math.hypot(event.clientX - exerciseDrag.startX, event.clientY - exerciseDrag.startY);
+  if (!exerciseDrag.dragging && distance < 8) return;
+  event.preventDefault();
+  if (!exerciseDrag.dragging) {
+    exerciseDrag.dragging = true;
+    exerciseDrag.handle.dataset.suppressClick = "true";
+    exerciseDrag.row.classList.add("dragging");
+    document.body.classList.add("is-reordering");
+  }
+
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".edit-exercise");
+  if (!target || target === exerciseDrag.row || target.dataset.workout !== exerciseDrag.workoutId) return;
+  const targetRect = target.getBoundingClientRect();
+  if (event.clientY > targetRect.top + targetRect.height / 2) {
+    target.after(exerciseDrag.row);
+  } else {
+    target.before(exerciseDrag.row);
+  }
+}
+
+function endExerciseDrag(event) {
+  if (!exerciseDrag || event.pointerId !== exerciseDrag.pointerId) return;
+  const dragged = exerciseDrag.dragging;
+  const { handle, row, workoutId } = exerciseDrag;
+  cleanupExerciseDrag();
+  if (!dragged) return;
+  handle.dataset.suppressClick = "true";
+  row.classList.remove("dragging");
+  saveExerciseOrderFromDom(workoutId);
+  render();
+  toast("Ordem dos exercícios atualizada.");
+}
+
+function cancelExerciseDrag(event) {
+  if (!exerciseDrag || event.pointerId !== exerciseDrag.pointerId) return;
+  exerciseDrag.row.classList.remove("dragging");
+  cleanupExerciseDrag();
+}
+
+function cleanupExerciseDrag() {
+  const { handle, pointerId } = exerciseDrag || {};
+  if (handle) {
+    handle.releasePointerCapture?.(pointerId);
+    handle.removeEventListener("pointermove", moveExerciseDrag);
+    handle.removeEventListener("pointerup", endExerciseDrag);
+    handle.removeEventListener("pointercancel", cancelExerciseDrag);
+  }
+  document.body.classList.remove("is-reordering");
+  exerciseDrag = null;
+}
+
+function saveExerciseOrderFromDom(workoutId) {
+  const workout = getWorkouts().find((item) => item.id === workoutId);
+  const rows = [...document.querySelectorAll(`.edit-exercise[data-workout="${workoutId}"]`)];
+  if (!workout || !rows.length) return;
+  const byId = new Map(workout.exercises.map((item) => [item.id, item]));
+  workout.exercises = rows.map((row) => byId.get(row.dataset.exercise)).filter(Boolean);
+  saveState();
 }
 
 function saveExercise(event) {
@@ -861,13 +956,96 @@ function removeActiveProgram() {
 }
 
 function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  downloadJson(state, `treino-progressivo-${todayKey()}.json`);
+}
+
+function downloadJson(payload, filename) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `treino-progressivo-${todayKey()}.json`;
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function exportActiveProgram() {
+  const program = getActiveProgram();
+  downloadJson({
+    type: "treino-progressivo-program",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    program
+  }, `rotina-${slugify(program.name)}-${todayKey()}.json`);
+  toast("Rotina exportada.");
+}
+
+function slugify(value) {
+  return String(value || "treino")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 42) || "treino";
+}
+
+function normalizeImportedProgram(program) {
+  if (!program || !Array.isArray(program.workouts)) return null;
+  const workouts = program.workouts.map((workout, workoutIndex) => ({
+    id: crypto.randomUUID(),
+    name: String(workout.name || `Treino ${workoutIndex + 1}`),
+    label: String(workout.label || "importado"),
+    color: workout.color || "#38c172",
+    schedule: String(workout.schedule || "Dia livre"),
+    exercises: Array.isArray(workout.exercises) ? workout.exercises.map((item) => ({
+      id: crypto.randomUUID(),
+      name: String(item.name || "Exercício"),
+      group: String(item.group || "Geral"),
+      minReps: Number(item.minReps) || 0,
+      maxReps: Number(item.maxReps) || 0,
+      note: String(item.note || "")
+    })) : []
+  }));
+  if (!workouts.length) return null;
+  return {
+    id: crypto.randomUUID(),
+    name: `${String(program.name || "Rotina importada")} (importada)`,
+    workouts
+  };
+}
+
+function programFromImportPayload(payload) {
+  if (payload?.type === "treino-progressivo-program") return normalizeImportedProgram(payload.program);
+  if (payload?.program) return normalizeImportedProgram(payload.program);
+  if (Array.isArray(payload?.programs)) {
+    const importedProgram = payload.programs.find((program) => program.id === payload.activeProgramId) || payload.programs[0];
+    return normalizeImportedProgram(importedProgram);
+  }
+  return normalizeImportedProgram(payload);
+}
+
+async function importProgram(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    const program = programFromImportPayload(payload);
+    if (!program) {
+      toast("Arquivo de rotina inválido.");
+      return;
+    }
+    state.programs.push(program);
+    state.activeProgramId = program.id;
+    state.activeWorkoutId = program.workouts[0]?.id || "";
+    removeProgramConfirming = false;
+    saveState();
+    render();
+    toast("Rotina importada.");
+  } catch {
+    toast("Não consegui ler esse arquivo.");
+  }
 }
 
 function sessionVolume(session) {
@@ -951,6 +1129,7 @@ $("#clearTodayBtn").addEventListener("click", clearToday);
 $("#progressWorkoutFilter").addEventListener("change", renderProgress);
 $("#exportBtn").addEventListener("click", exportData);
 $("#addWorkoutBtn").addEventListener("click", () => addProgram("blank"));
+$("#importProgramInput").addEventListener("change", importProgram);
 $("#exerciseForm").addEventListener("submit", saveExercise);
 $("#cancelEditBtn").addEventListener("click", () => $("#editDialog").close());
 

@@ -630,6 +630,12 @@ button:focus-visible {
   background: #111d26;
 }
 
+.edit-exercise.dragging {
+  outline: 2px solid var(--mat-blue);
+  background: color-mix(in srgb, var(--mat-blue) 18%, #111d26);
+  opacity: 0.92;
+}
+
 .edit-buttons {
   display: flex;
   gap: 6px;
@@ -649,6 +655,16 @@ button:focus-visible {
   background: var(--mat-panel-2);
   color: var(--mat-soft);
   font-weight: 900;
+}
+
+.drag-exercise-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.drag-exercise-handle:active,
+.is-reordering .drag-exercise-handle {
+  cursor: grabbing;
 }
 
 .bottom-nav {
